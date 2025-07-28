@@ -2,7 +2,6 @@ using SafeTestsets
 using Documenter
 using HallThruster
 
-
 doctest(HallThruster)
 
 @safetestset "Thrusters" include("unit_tests/thrusters.jl")
@@ -21,6 +20,7 @@ doctest(HallThruster)
 @safetestset "Grid" include("unit_tests/grid.jl")
 @safetestset "Current control" include("unit_tests/current_control.jl")
 @safetestset "Setup" include("unit_tests/setup.jl")
+@safetestset "MTCR Coupling" include("unit_tests/mtcr_coupling.jl")
 @safetestset "JSON" include("json/json.jl")
 @safetestset "External coupling" include("external_coupling/anom.jl")
 @safetestset "Output regression" include("regression/test_regression.jl")

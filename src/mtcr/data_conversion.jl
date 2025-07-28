@@ -33,6 +33,9 @@ const J_TO_ERG = 1e7         # J to erg
 const ERG_TO_J = 1e-7        # erg to J
 const PA_TO_DYNE_CM2 = 10.0  # Pa to dyne/cm²
 const DYNE_CM2_TO_PA = 0.1   # dyne/cm² to Pa
+const J_M3_TO_ERG_CM3 = 10.0  # J/m³ to erg/cm³
+const ERG_CM3_TO_J_M3 = 0.1   # erg/cm³ to J/m³
+const AVOGADRO = 6.02214076e23  # Avogadro's number (1/mol)
 
 """
 $(SIGNATURES)
@@ -58,7 +61,7 @@ $(SIGNATURES)
 Convert energy density from SI (J/m³) to CGS (erg/cm³) units.
 """
 function convert_energy_density_si_to_cgs(energy_si::Float64)
-    return energy_si * J_TO_ERG * KG_M3_TO_G_CM3
+    return energy_si * J_M3_TO_ERG_CM3
 end
 
 """
@@ -67,7 +70,7 @@ $(SIGNATURES)
 Convert energy density from CGS (erg/cm³) to SI (J/m³) units.
 """
 function convert_energy_density_cgs_to_si(energy_cgs::Float64)
-    return energy_cgs * ERG_TO_J * G_CM3_TO_KG_M3
+    return energy_cgs * ERG_CM3_TO_J_M3
 end
 
 """
@@ -376,7 +379,6 @@ function mole_fractions_to_mass_densities(mole_fractions::Vector{Float64},
 
     # Convert to mass densities (g/cm³)
     # number_density (1/cm³) * molecular_weight (g/mol) / Avogadro (1/mol) = mass_density (g/cm³)
-    const AVOGADRO = 6.02214076e23
     mass_densities = number_densities .* molecular_weights ./ AVOGADRO
 
     return mass_densities
@@ -399,8 +401,6 @@ function mass_densities_to_mole_fractions(mass_densities::Vector{Float64},
     if length(mass_densities) != length(molecular_weights)
         error("Mass densities and molecular weights arrays must have same length")
     end
-
-    const AVOGADRO = 6.02214076e23
 
     # Convert to number densities
     number_densities = mass_densities .* AVOGADRO ./ molecular_weights
