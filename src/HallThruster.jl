@@ -67,6 +67,9 @@ include("simulation/simulation.jl")
 include("simulation/postprocess.jl")
 include("simulation/json.jl")
 
+# MTCR interface module for thermochemical nonequilibrium modeling
+include("mtcr/mtcr_interface.jl")
+
 @public PYTHON_PATH
 
 """
@@ -150,7 +153,8 @@ function example_simulation(; ncells, duration, dt, nsave)
         domain = (0.0, 0.08),
         discharge_voltage = 300.0,
         anode_mass_flow_rate = 5.0e-6,
-        anom_model = ScaledGaussianBohm(anom_scale = 0.0625, barrier_scale = 0.9, center = 1.0, width = 0.1),
+        anom_model = ScaledGaussianBohm(
+            anom_scale = 0.0625, barrier_scale = 0.9, center = 1.0, width = 0.1,),
         wall_loss_model = ConstantSheathPotential(20.0, 1.0, 1.0),
         conductivity_model = Braginskii(),
         neutral_temperature_K = 500,
