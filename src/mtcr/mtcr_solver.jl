@@ -29,6 +29,9 @@ println("Final temperature: ", results.temperatures.tt[end])
 
 using DocStringExtensions
 
+# Physical constants
+const BOLTZMANN_CGS = 1.380649e-16  # erg/K
+
 # Global state tracking
 const MTCR_INITIALIZED = Ref{Bool}(false)
 const MTCR_NUM_SPECIES = Ref{Int32}(0)
@@ -188,7 +191,6 @@ function config_to_initial_state(config::MTCRConfig)
 
     # Estimate thermal energy (very simplified)
     # E = (3/2) * n * k * T for translational + electronic
-    const BOLTZMANN_CGS = 1.380649e-16  # erg/K
     thermal_energy_per_volume = 1.5 * number_density_cgs * BOLTZMANN_CGS *
                                 config.temperatures.Tt
 

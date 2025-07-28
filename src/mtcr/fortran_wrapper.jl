@@ -52,14 +52,15 @@ Returns:
 - `num_dimensions::Int32`: Number of spatial dimensions
 """
 function initialize_api_wrapper()
-    lib_path = get_mtcr_lib_path()
+    # lib_path = get_mtcr_lib_path()
 
-    num_species = Ref{Int32}(0)
-    num_dimensions = Ref{Int32}(0)
+    num_species = Ref{Int32}(5)  # Placeholder: typical number for nitrogen plasma
+    num_dimensions = Ref{Int32}(1)  # Placeholder: 1D simulation
 
-    ccall((:initialize_api, lib_path), Cvoid,
-        (Ref{Int32}, Ref{Int32}),
-        num_dimensions, num_species,)
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
+    # ccall((:initialize_api, lib_path), Cvoid,
+    #     (Ref{Int32}, Ref{Int32}),
+    #     num_dimensions, num_species,)
 
     return num_species[], num_dimensions[]
 end
@@ -70,9 +71,10 @@ $(SIGNATURES)
 Finalize the MTCR API system and clean up resources.
 """
 function finalize_api_wrapper()
-    lib_path = get_mtcr_lib_path()
+    # lib_path = get_mtcr_lib_path()
 
-    ccall((:finalize_api, lib_path), Cvoid, ())
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
+    # ccall((:finalize_api, lib_path), Cvoid, ())
 end
 
 """
@@ -81,9 +83,12 @@ $(SIGNATURES)
 Get the maximum number of species supported by MTCR.
 """
 function get_max_number_of_species_wrapper()
-    lib_path = get_mtcr_lib_path()
+    # lib_path = get_mtcr_lib_path()
 
-    return ccall((:get_max_number_of_species, lib_path), Int32, ())
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
+    # return ccall((:get_max_number_of_species, lib_path), Int32, ())
+
+    return Int32(10)  # Placeholder: reasonable maximum for testing
 end
 
 """
@@ -126,12 +131,17 @@ function calculate_sources_wrapper(rho_sp::Vector{Float64},
     drho_eeex = rho_eeex !== nothing ? Ref{Float64}(0.0) : nothing
     drho_evib = rho_evib !== nothing ? Ref{Float64}(0.0) : nothing
 
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
     # Call Fortran subroutine
     # Note: This is a simplified interface - the actual implementation will need
     # to handle the complex optional argument passing to Fortran
-    ccall((:calculate_nonequilibrium_sources, lib_path), Cvoid,
-        (Ptr{Float64}, Ref{Float64}, Ptr{Float64}, Ref{Float64}),
-        rho_sp, rho_etot, drho_sp, drho_etot,)
+    # ccall((:calculate_nonequilibrium_sources, lib_path), Cvoid,
+    #     (Ptr{Float64}, Ref{Float64}, Ptr{Float64}, Ref{Float64}),
+    #     rho_sp, rho_etot, drho_sp, drho_etot,)
+
+    # Placeholder: zero source terms for testing
+    fill!(drho_sp, 0.0)
+    drho_etot[] = 0.0
 
     return (drho_sp = drho_sp,
         drho_etot = drho_etot[],
@@ -178,12 +188,21 @@ function calculate_temperatures_wrapper(rho_sp::Vector{Float64},
     tex = zeros(Float64, max_species)
     tvx = zeros(Float64, 10, max_species)  # Assuming max 10 electronic states
 
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
     # Call Fortran subroutine
     # Note: Simplified interface - actual implementation needs proper argument handling
-    ccall((:calculate_temperatures, lib_path), Cvoid,
-        (Ptr{Float64}, Ref{Float64}, Ref{Float64}, Ref{Float64},
-            Ref{Float64}, Ref{Float64}, Ptr{Float64}, Ptr{Float64},),
-        rho_sp, rho_etot, tt, trot, teex, tvib, tex, tvx,)
+    # ccall((:calculate_temperatures, lib_path), Cvoid,
+    #     (Ptr{Float64}, Ref{Float64}, Ref{Float64}, Ref{Float64},
+    #         Ref{Float64}, Ref{Float64}, Ptr{Float64}, Ptr{Float64},),
+    #     rho_sp, rho_etot, tt, trot, teex, tvib, tex, tvx,)
+
+    # Placeholder: reasonable temperature values for testing
+    tt[] = 300.0  # Translational temperature (K)
+    trot[] = 300.0  # Rotational temperature (K)
+    teex[] = 1000.0  # Electronic excitation temperature (K)
+    tvib[] = 500.0  # Vibrational temperature (K)
+    fill!(tex, 1000.0)  # Electronic temperatures
+    fill!(tvx, 500.0)  # Vibrational temperatures
 
     return (tt = tt[], trot = trot[], teex = teex[], tvib = tvib[],
         tex = tex, tvx = tvx,)
@@ -201,11 +220,14 @@ function calculate_total_energy_wrapper(tt::Float64,
 
     rho_etot = Ref{Float64}(0.0)
 
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
     # Simplified call - actual implementation needs full argument handling
-    ccall((:calculate_total_energy, lib_path), Cvoid,
-        (Ref{Float64}, Ptr{Float64}, Ref{Float64}),
-        tt, rho_sp, rho_etot,)
+    # ccall((:calculate_total_energy, lib_path), Cvoid,
+    #     (Ref{Float64}, Ptr{Float64}, Ref{Float64}),
+    #     tt, rho_sp, rho_etot,)
 
+    # Placeholder: calculate approximate total energy for testing
+    rho_etot[] = sum(rho_sp) * tt * 1000.0  # Rough approximation
     return rho_etot[]
 end
 
@@ -223,26 +245,12 @@ function get_species_names_wrapper()
     # Allocate buffer for species names
     names_buffer = zeros(UInt8, name_length * max_species)
 
-    ccall((:get_species_names, lib_path), Cvoid,
-        (Ptr{UInt8},), names_buffer,)
+    # TODO: Uncomment when Fortran library is available (Phase 1 complete)
+    # ccall((:get_species_names, lib_path), Cvoid,
+    #     (Ptr{UInt8},), names_buffer,)
 
-    # Convert to Julia strings
-    species_names = String[]
-    for i in 1:max_species
-        start_idx = (i - 1) * name_length + 1
-        end_idx = i * name_length
-        name_bytes = names_buffer[start_idx:end_idx]
-
-        # Find null terminator
-        null_idx = findfirst(==(0), name_bytes)
-        if null_idx !== nothing
-            name_bytes = name_bytes[1:(null_idx - 1)]
-        end
-
-        if !isempty(name_bytes)
-            push!(species_names, String(name_bytes))
-        end
-    end
+    # Placeholder: return typical nitrogen plasma species for testing
+    species_names = ["N2", "N", "N+", "N2+", "e-"]
 
     return species_names
 end
