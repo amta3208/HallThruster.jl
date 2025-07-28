@@ -34,7 +34,7 @@ results = solve_mtcr_0d(config, initial_conditions)
 """
 module MTCR
 
-using DocStringExtensions
+using DocStringExtensions, Libdl
 
 # Include submodules
 include("fortran_wrapper.jl")
