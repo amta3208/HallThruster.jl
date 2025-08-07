@@ -16,9 +16,16 @@ including parameter validation, default values, and input file generation.
 - `MTCRConfig`: Constructor with validation
 - `validate_config`: Validate configuration parameters
 - `generate_input_files`: Generate MTCR input files from configuration
+
+## Integration
+
+This module integrates with:
+- `fortran_wrapper.jl`: For library management and Fortran interface requirements
+- `data_conversion.jl`: For unit conversions and species validation
 """
 
-using DocStringExtensions
+# Import functions from other MTCR modules for integration
+include("data_conversion.jl")
 
 """
 Temperature configuration for MTCR simulation.
@@ -26,20 +33,20 @@ Temperature configuration for MTCR simulation.
 # Fields
 - `Tt::Float64`: Translational temperature (K)
 - `Tv::Float64`: Vibrational temperature (K)
-- `Te::Float64`: Electron temperature (K)
 - `Tee::Float64`: Electron-electronic temperature (K)
+- `Te::Float64`: Electron temperature (K)
 """
 struct TemperatureConfig
     Tt::Float64
     Tv::Float64
-    Te::Float64
     Tee::Float64
+    Te::Float64
 
-    function TemperatureConfig(Tt, Tv, Te, Tee = Tt)
-        if any([Tt, Tv, Te, Tee] .<= 0)
+    function TemperatureConfig(Tt, Tv, Tee, Te)
+        if any([Tt, Tv, Tee, Te] .<= 0)
             error("All temperatures must be positive")
         end
-        new(Float64(Tt), Float64(Tv), Float64(Te), Float64(Tee))
+        new(Float64(Tt), Float64(Tv), Float64(Tee), Float64(Te))
     end
 end
 
@@ -152,6 +159,10 @@ Main configuration struct for MTCR simulations.
 - `physics::PhysicsConfig`: Physics modeling options
 - `processes::ProcessConfig`: Process flags
 - `database_path::String`: Path to chemistry database
+- `library_path::String`: Path to MTCR shared library
+- `case_path::String`: Working directory for MTCR simulation
+- `unit_system::Symbol`: Unit system (:SI or :CGS)
+- `validate_species_against_mtcr::Bool`: Validate species against MTCR database
 - `radiation_length::Float64`: Radiation length scale (cm)
 - `print_source_terms::Bool`: Print source terms flag
 - `get_electron_density_by_charge_balance::Bool`: Electron density by charge balance
@@ -167,6 +178,10 @@ struct MTCRConfig
     physics::PhysicsConfig
     processes::ProcessConfig
     database_path::String
+    library_path::String
+    case_path::String
+    unit_system::Symbol
+    validate_species_against_mtcr::Bool
     radiation_length::Float64
     print_source_terms::Bool
     get_electron_density_by_charge_balance::Bool
@@ -182,6 +197,10 @@ struct MTCRConfig
             physics::PhysicsConfig = PhysicsConfig(),
             processes::ProcessConfig = ProcessConfig(),
             database_path::String = "../../databases/n2/elec_sts_expanded_electron_fits_ground",
+            library_path::String = "",
+            case_path::String = pwd(),
+            unit_system::Symbol = :CGS,
+            validate_species_against_mtcr::Bool = false,
             radiation_length::Float64 = 1.0,
             print_source_terms::Bool = true,
             get_electron_density_by_charge_balance::Bool = true,
@@ -191,10 +210,12 @@ struct MTCRConfig
 
         # Validate inputs
         validate_config(
-            species, mole_fractions, total_number_density, temperatures, time_params,)
+            species, mole_fractions, total_number_density, temperatures, time_params,
+            library_path, case_path, unit_system,)
 
         new(species, mole_fractions, total_number_density, temperatures, time_params,
-            physics, processes, database_path, radiation_length, print_source_terms,
+            physics, processes, database_path, library_path, case_path, unit_system,
+            validate_species_against_mtcr, radiation_length, print_source_terms,
             get_electron_density_by_charge_balance, min_sts_frac, is_isothermal_teex,)
     end
 end
@@ -232,6 +253,9 @@ Validate MTCR configuration parameters.
 - `total_number_density::Float64`: Total number density
 - `temperatures::TemperatureConfig`: Temperature configuration
 - `time_params::TimeIntegrationConfig`: Time integration parameters
+- `library_path::String`: Path to MTCR shared library
+- `case_path::String`: Working directory path
+- `unit_system::Symbol`: Unit system specification
 
 # Throws
 - `ArgumentError` if validation fails
@@ -240,7 +264,10 @@ function validate_config(species::Vector{String},
         mole_fractions::Vector{Float64},
         total_number_density::Float64,
         temperatures::TemperatureConfig,
-        time_params::TimeIntegrationConfig,)
+        time_params::TimeIntegrationConfig,
+        library_path::String,
+        case_path::String,
+        unit_system::Symbol,)
 
     # Check species and mole fractions consistency
     if length(species) != length(mole_fractions)
@@ -278,38 +305,90 @@ function validate_config(species::Vector{String},
         end
     end
 
+    # Validate library path if provided
+    if !isempty(library_path) && !isfile(library_path)
+        throw(ArgumentError("MTCR library file not found: $library_path"))
+    end
+
+    # Validate case path
+    if !isdir(case_path)
+        throw(ArgumentError("Case path directory does not exist: $case_path"))
+    end
+
+    # Validate unit system
+    if !(unit_system in [:SI, :CGS])
+        throw(ArgumentError("Unit system must be :SI or :CGS, got :$unit_system"))
+    end
+
     return true
 end
 
 """
 $(SIGNATURES)
 
-Generate MTCR input files from configuration.
+Generate MTCR input files from configuration with proper directory structure.
+
+This function creates the directory structure required by the Fortran wrapper:
+- case_path/input/     (input files)
+- case_path/output/    (output files)
+- case_path/output/sources/  (source term outputs)
+- case_path/output/states/   (state outputs)
 
 # Arguments
 - `config::MTCRConfig`: MTCR configuration
-- `output_dir::String`: Output directory for input files
+- `case_path::String`: Case directory path (default: config.case_path)
 
 # Returns
 - `true` if files generated successfully
+
+# Throws
+- `ErrorException` if file generation fails
 """
-function generate_input_files(config::MTCRConfig, output_dir::String)
+function generate_input_files(config::MTCRConfig, case_path::String = config.case_path)
+    try
+        # Create required directory structure as expected by fortran_wrapper
+        input_dir = joinpath(case_path, "input")
+        output_dir = joinpath(case_path, "output")
+        sources_dir = joinpath(output_dir, "sources")
+        states_dir = joinpath(output_dir, "states")
 
-    # Create output directory if it doesn't exist
-    if !isdir(output_dir)
-        mkpath(output_dir)
+        # Create all required directories
+        for dir in [input_dir, output_dir, sources_dir, states_dir]
+            if !isdir(dir)
+                mkpath(dir)
+            end
+        end
+
+        # Validate database path if it's a relative path
+        database_path = config.database_path
+        if !isabspath(database_path)
+            # Convert relative path to absolute from case_path
+            database_path = abspath(joinpath(case_path, database_path))
+        end
+
+        # Check if database directory exists (warn if not found)
+        if !isdir(database_path)
+            @warn "Database path not found: $database_path. This may cause MTCR initialization to fail."
+        else
+            # Check for chemistry.dat file
+            chemistry_file = joinpath(database_path, "chemistry.dat")
+            if !isfile(chemistry_file)
+                @warn "chemistry.dat not found in database path: $chemistry_file"
+            end
+        end
+
+        # Generate input files in the input directory
+        generate_prob_setup_file(config, joinpath(input_dir, "prob_setup.inp"))
+        generate_sources_setup_file(config, joinpath(input_dir, "sources_setup.inp"))
+        generate_tau_scaling_file(config, joinpath(input_dir, "tau_scaling.inp"))
+
+        @info "MTCR input files generated successfully" case_path=case_path
+
+        return true
+
+    catch e
+        error("Failed to generate MTCR input files: $(e)")
     end
-
-    # Generate prob_setup.inp
-    generate_prob_setup_file(config, joinpath(output_dir, "prob_setup.inp"))
-
-    # Generate sources_setup.inp
-    generate_sources_setup_file(config, joinpath(output_dir, "sources_setup.inp"))
-
-    # Generate tau_scaling.inp (empty for now)
-    generate_tau_scaling_file(config, joinpath(output_dir, "tau_scaling.inp"))
-
-    return true
 end
 
 """
@@ -458,8 +537,12 @@ function nitrogen_10ev_config()
     mole_fractions = [1.0e-20, 0.9998, 1.0e-20, 0.0001, 0.0001]
     total_number_density = 1.0e13  # 1/cm³
 
-    temperatures = TemperatureConfig(750.0, 750.0, 115000.0, 750.0)
+    temperatures = TemperatureConfig(750.0, 750.0, 750.0, 115000.0)
     time_params = TimeIntegrationConfig(0.5e-5, 5.0, 1e3, 500000, 2)
+
+    #TODO: Clean up & abstract library/database/case path handling
+    temp_library_path = "/Users/amin/postdoc/codes/HallThruster.jl/mtcr/source/libmtcr.so"
+    temp_database_path = "/Users/amin/postdoc/codes/HallThruster.jl/test/unit_tests/mtcr/test_case/database/n2/elec_sts_expanded_electron_fits_ground"
 
     return MTCRConfig(
         species = species,
@@ -467,6 +550,8 @@ function nitrogen_10ev_config()
         total_number_density = total_number_density,
         temperatures = temperatures,
         time_params = time_params,
+        library_path = temp_library_path,
+        database_path = temp_database_path,
     )
 end
 
@@ -511,4 +596,171 @@ function get_molecular_weights(species::Vector{String})
     end
 
     return weights
+end
+
+"""
+$(SIGNATURES)
+
+Validate species against MTCR database (requires loaded library).
+
+This function uses the fortran_wrapper to query the MTCR database
+for available species and validates the configuration species against it.
+
+# Arguments
+- `config::MTCRConfig`: Configuration to validate
+
+# Returns
+- `true` if validation passes
+
+# Throws
+- `ErrorException` if species validation fails or library not loaded
+"""
+function validate_species_against_mtcr_database(config::MTCRConfig)
+    # This function would require the fortran_wrapper to be loaded
+    # For now, we'll implement a basic check and leave room for enhancement
+
+    if config.validate_species_against_mtcr
+        @warn "Species validation against MTCR database not yet implemented. Skipping validation."
+        # TODO: Implement when fortran_wrapper integration is complete
+        # try
+        #     include("fortran_wrapper.jl")
+        #     if is_mtcr_loaded()
+        #         mtcr_species = get_species_names_wrapper()
+        #         validate_species_data(config.species, mtcr_species, config.mole_fractions)
+        #     else
+        #         @warn "MTCR library not loaded. Cannot validate species against database."
+        #     end
+        # catch e
+        #     @warn "Failed to validate species against MTCR database: $(e)"
+        # end
+    end
+
+    return true
+end
+
+"""
+$(SIGNATURES)
+
+Convert configuration units if needed.
+
+# Arguments
+- `config::MTCRConfig`: Configuration to convert
+- `target_unit_system::Symbol`: Target unit system (:SI or :CGS)
+
+# Returns
+- `MTCRConfig`: Configuration with converted units
+"""
+function convert_config_units(config::MTCRConfig, target_unit_system::Symbol)
+    if config.unit_system == target_unit_system
+        return config  # No conversion needed
+    end
+
+    if config.unit_system == :SI && target_unit_system == :CGS
+        # Convert SI to CGS
+        new_total_number_density = convert_number_density_si_to_cgs(config.total_number_density)
+
+        # Create new config with converted units
+        return MTCRConfig(
+            species = config.species,
+            mole_fractions = config.mole_fractions,
+            total_number_density = new_total_number_density,
+            temperatures = config.temperatures,  # Temperature units are the same
+            time_params = config.time_params,     # Time units are the same
+            physics = config.physics,
+            processes = config.processes,
+            database_path = config.database_path,
+            library_path = config.library_path,
+            case_path = config.case_path,
+            unit_system = target_unit_system,
+            validate_species_against_mtcr = config.validate_species_against_mtcr,
+            radiation_length = config.radiation_length,
+            print_source_terms = config.print_source_terms,
+            get_electron_density_by_charge_balance = config.get_electron_density_by_charge_balance,
+            min_sts_frac = config.min_sts_frac,
+            is_isothermal_teex = config.is_isothermal_teex,
+        )
+
+    elseif config.unit_system == :CGS && target_unit_system == :SI
+        # Convert CGS to SI
+        new_total_number_density = convert_number_density_cgs_to_si(config.total_number_density)
+
+        # Create new config with converted units
+        return MTCRConfig(
+            species = config.species,
+            mole_fractions = config.mole_fractions,
+            total_number_density = new_total_number_density,
+            temperatures = config.temperatures,  # Temperature units are the same
+            time_params = config.time_params,     # Time units are the same
+            physics = config.physics,
+            processes = config.processes,
+            database_path = config.database_path,
+            library_path = config.library_path,
+            case_path = config.case_path,
+            unit_system = target_unit_system,
+            validate_species_against_mtcr = config.validate_species_against_mtcr,
+            radiation_length = config.radiation_length,
+            print_source_terms = config.print_source_terms,
+            get_electron_density_by_charge_balance = config.get_electron_density_by_charge_balance,
+            min_sts_frac = config.min_sts_frac,
+            is_isothermal_teex = config.is_isothermal_teex,
+        )
+    else
+        error("Unsupported unit conversion: $(config.unit_system) to $target_unit_system")
+    end
+end
+
+"""
+$(SIGNATURES)
+
+Create configuration for different propellant types.
+
+# Arguments
+- `propellant::Symbol`: Propellant type (:nitrogen, :argon, :xenon, :krypton)
+- `electron_temperature::Float64`: Electron temperature (K)
+- `gas_temperature::Float64`: Gas temperature (K, default: 300K)
+- `total_number_density::Float64`: Total number density (1/cm³, default: 1e13)
+
+# Returns
+- `MTCRConfig`: Configuration for the specified propellant
+"""
+function create_propellant_config(propellant::Symbol;
+        electron_temperature::Float64 = 115000.0,
+        gas_temperature::Float64 = 300.0,
+        total_number_density::Float64 = 1.0e13,)
+    if propellant == :nitrogen
+        species = ["N", "N2", "N+", "N2+", "E-"]
+        mole_fractions = [1.0e-20, 0.9998, 1.0e-20, 0.0001, 0.0001]
+        database_path = "../../databases/n2/elec_sts_expanded_electron_fits_ground"
+
+    elseif propellant == :argon
+        species = ["Ar", "Ar+", "E-"]
+        mole_fractions = [0.9998, 0.0001, 0.0001]
+        database_path = "../../databases/argon"
+
+    elseif propellant == :xenon
+        species = ["Xe", "Xe+", "E-"]
+        mole_fractions = [0.9998, 0.0001, 0.0001]
+        database_path = "../../databases/air_xenon"  # Adjust as needed
+
+    elseif propellant == :krypton
+        species = ["Kr", "Kr+", "E-"]
+        mole_fractions = [0.9998, 0.0001, 0.0001]
+        database_path = "../../databases/air_krypton"  # Adjust as needed
+
+    else
+        error("Unsupported propellant type: $propellant. Supported types: :nitrogen, :argon, :xenon, :krypton")
+    end
+
+    temperatures = TemperatureConfig(
+        gas_temperature, gas_temperature, gas_temperature, electron_temperature,)
+    time_params = TimeIntegrationConfig(0.5e-5, 5.0, 1e3, 500000, 2)
+
+    return MTCRConfig(
+        species = species,
+        mole_fractions = mole_fractions,
+        total_number_density = total_number_density,
+        temperatures = temperatures,
+        time_params = time_params,
+        database_path = database_path,
+    )
 end

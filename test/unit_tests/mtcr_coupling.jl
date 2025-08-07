@@ -1,6 +1,6 @@
 using Test
 
-@testset "MTCR Module Tests" begin
+@testset verbose=true "MTCR Module Tests" begin
     @testset "Data Conversion" begin
         include("mtcr/data_conversion.jl")
     end
@@ -9,10 +9,9 @@ using Test
         include("mtcr/fortran_wrapper.jl")
     end
 
-    # Future testsets as more modules are tested
-    # @testset "MTCR Configuration" begin
-    #     include("mtcr/mtcr_config.jl")
-    # end
+    @testset "MTCR Configuration" begin
+        include("mtcr/mtcr_config.jl")
+    end
 
     # @testset "MTCR Solver" begin
     #     include("mtcr/mtcr_solver.jl")

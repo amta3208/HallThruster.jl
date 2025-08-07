@@ -48,7 +48,7 @@ config = HallThruster.MTCR.MTCRConfig(
     species = ["N", "N2", "N+", "N2+", "E-"],
     mole_fractions = [1e-20, 0.9998, 1e-20, 0.0001, 0.0001],
     total_number_density = 1.0e13,  # 1/cm³
-    temperatures = HallThruster.MTCR.TemperatureConfig(750.0, 750.0, 115000.0),
+    temperatures = HallThruster.MTCR.TemperatureConfig(750.0, 750.0, 750.0, 115000.0),
     time_params = HallThruster.MTCR.TimeIntegrationConfig(0.5e-5, 5.0, 1e3)
 )
 
