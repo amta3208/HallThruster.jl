@@ -220,6 +220,98 @@ function test_multiple_propellants()
     return
 end
 
+function test_external_chemistry_bypass()
+    @testset "External chemistry bypass" begin
+        source_heavy_species = function(fluid_containers, params)
+            for i in 2:(params.grid.num_cells - 1)
+                fluid_containers.continuity[1].dens_ddt[i] += 1.0e-7 * i
+                fluid_containers.isothermal[1].dens_ddt[i] += 2.0e-7 * i
+                fluid_containers.isothermal[1].mom_ddt[i] += 3.0e-4 * i
+            end
+            return nothing
+        end
+
+        source_energy = function(Q, params)
+            fill!(Q, 0.0)
+            for i in 2:(params.grid.num_cells - 1)
+                Q[i] = 5.0 * i
+            end
+            return nothing
+        end
+
+        config = het.Config(
+            thruster = het.SPT_100,
+            domain = (0.0, 0.02),
+            discharge_voltage = 50.0,
+            anode_mass_flow_rate = 5.0e-6,
+            propellant = het.Xenon,
+            ncharge = 1,
+            anode_boundary_condition = :dirichlet,
+            anode_Tev = 2.0,
+            cathode_Tev = 2.0,
+            ionization_model = :None,
+            excitation_model = :None,
+            electron_neutral_model = :None,
+            electron_ion_collisions = false,
+            anom_model = het.NoAnom(),
+            wall_loss_model = het.NoWallLosses(),
+            source_heavy_species = source_heavy_species,
+            source_energy = source_energy,
+        )
+        simparams = het.SimParams(
+            grid = het.EvenGrid(8),
+            dt = 1.0e-9,
+            duration = 2.0e-9,
+            num_save = 2,
+            adaptive = false,
+            verbose = false,
+            print_errors = false,
+        )
+
+        params = het.setup_simulation(config, simparams)
+        interior = 2:(params.grid.num_cells - 1)
+
+        @test isempty(params.ei_reactions)
+        @test isempty(params.excitation_reactions)
+
+        for fluid in params.fluid_array
+            fill!(fluid.dens_ddt, 0.0)
+            fill!(fluid.mom_ddt, 0.0)
+        end
+
+        config.source_heavy_species(params.fluid_containers, params)
+        het.apply_reactions!(params.fluid_array, params)
+
+        expected_neutral_density = [1.0e-7 * i for i in interior]
+        expected_ion_density = [2.0e-7 * i for i in interior]
+        expected_ion_momentum = [3.0e-4 * i for i in interior]
+
+        @test params.fluid_containers.continuity[1].dens_ddt[interior] == expected_neutral_density
+        @test params.fluid_containers.isothermal[1].dens_ddt[interior] == expected_ion_density
+        @test params.fluid_containers.isothermal[1].mom_ddt[interior] == expected_ion_momentum
+        @test params.fluid_containers.continuity[1].dens_ddt[[1, end]] == [0.0, 0.0]
+        @test params.fluid_containers.isothermal[1].dens_ddt[[1, end]] == [0.0, 0.0]
+        @test params.fluid_containers.isothermal[1].mom_ddt[[1, end]] == [0.0, 0.0]
+
+        params.cache.K .= 0.0
+        params.cache.ue .= 0.0
+        params.cache.∇pe .= 0.0
+        baseline_energy = zeros(length(params.cache.user_energy_source))
+        external_energy = zeros(length(params.cache.user_energy_source))
+        fill!(params.cache.user_energy_source, 0.0)
+        het.source_electron_energy!(baseline_energy, params, config.wall_loss_model)
+        config.source_energy(params.cache.user_energy_source, params)
+        het.source_electron_energy!(external_energy, params, config.wall_loss_model)
+
+        expected_user_energy = [5.0 * i for i in interior]
+        @test baseline_energy[interior] == zeros(length(interior))
+        @test external_energy[interior] == expected_user_energy
+        @test external_energy[[1, end]] == [0.0, 0.0]
+    end
+
+    return
+end
+
 function test_TOML_Read()
     @testset "TOML allowed_charges and max charge parsing" begin
         mktempdir() do dir
@@ -320,3 +412,4 @@ test_configuration()
 @testset "Multiple propellants" begin
     test_multiple_propellants()
 end
+test_external_chemistry_bypass()

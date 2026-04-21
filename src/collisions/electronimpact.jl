@@ -31,7 +31,9 @@ end
 function load_electron_impact_reactions(
         model::Symbol, species; directories = String[], kwargs...,
     )
-    if model == :Landmark
+    if model == :None
+        return ElectronImpactReaction[]
+    elseif model == :Landmark
         # check species
         if length(species) > 2 || species[1] != Xenon(0) || species[2] != Xenon(1)
             throw(ArgumentError("Unsupported species $(species) for LANDMARK ionization lookup."))
@@ -89,6 +91,6 @@ function load_electron_impact_reactions(
         # No ionization in OVS tests
         return [ElectronImpactReaction(12.12, Xenon(0), [Xenon(1)], [0.0, 0.0, 0.0])]
     else
-        throw(ArgumentError("Invalid ionization model $(model). Select :Landmark or :Lookup"))
+        throw(ArgumentError("Invalid ionization model $(model). Select :None, :Landmark, or :Lookup"))
     end
 end

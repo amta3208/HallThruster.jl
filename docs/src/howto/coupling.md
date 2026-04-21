@@ -168,6 +168,10 @@ function source_heavy_species(fluid_containers, params)
 end
 ```
 
+These hooks are additive. If you want an external provider to replace HallThruster.jl's built-in chemistry rather than supplement it, configure
+`ionization_model = :None` and `excitation_model = :None`
+to disable the built-in ionization and excitation source terms and avoid double counting.
+
 ## Electron energy
 
 !!! warning "Under development"
@@ -176,7 +180,7 @@ end
 The electron source term has the following signature.
 
 ```julia
-source_electrons(Q, params)::Nothing
+source_energy(Q, params)::Nothing
 ```
 
 Here, `Q` is the source vector.

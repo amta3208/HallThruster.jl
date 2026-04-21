@@ -14,12 +14,17 @@ Elastic scattering (electron-neutral) collisions are implemented via the `Elasti
 
 ## Ionization
 
-HallThruster.jl provides two models out of the box. These are
+HallThruster.jl supports the following ionization modes:
 
 | Model                   | Supported species                                            | Maximum charge state | Description                                                  |
 | ----------------------- | ------------------------------------------------------------ | -------------------- | ------------------------------------------------------------ |
+| `:None`                    | Any                                                          | N/A                  | Disable built-in ionization reactions. Useful when chemistry source terms are supplied through external coupling hooks. |
 | `IonizationLookup`         | `Xenon`, `Krypton`, `Argon`, `MolecularNitrogen (only up to 1+)` out of the box. With user-provided tables, can support any species | `3`                  | Ionization look-up table for species provided with HallThruster.jl. By default, the tables are stored in the `reactions` subfolder of the HallThruster.jl directory, but the user may provide additional directories in which to look for tables. |
 | `LandmarkIonizationLookup` | `Xenon`                                                      | `1`                  | Lookup table provided for the LANDMARK benchmark. Table is stored in the `landmark` subfolder of the HallThruster.jl directory. |
+
+When you want external `source_heavy_species` and `source_energy` hooks to replace the built-in chemistry rather than supplement it, pair
+`ionization_model = :None` with `excitation_model = :None`
+to avoid double counting.
 
 ### `IonizationLookup`
 
@@ -67,6 +72,7 @@ As with ionization, HallThruster.jl provides two models out of the box. These ar
 | `LandmarkExcitationLookup` | `Xenon`                                                      | Lookup table provided for the LANDMARK benchmark. Table is stored in the `landmark` subfolder of the HallThruster.jl directory. |
 
 Unlike ionization, which will throw an error if rate coefficients up to the specified charge state are not provided, HallThruster.jl will just not apply excitation reactions if they are not present.
+You may also disable built-in excitation explicitly with `excitation_model = :None`, which is the recommended setting when external source hooks replace chemistry.
 
 
 ### `ExcitationLookup`
