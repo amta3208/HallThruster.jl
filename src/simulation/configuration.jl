@@ -31,6 +31,18 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
     """
     cathode_coupling_voltage::Float64
     """
+    Whether to split the discharge into two independently driven stages at an intermediate electrode. **Default:** `false`.
+    """
+    intermediate_electrode::Bool
+    """
+    Axial location of the intermediate electrode, in m. Used only when `intermediate_electrode == true`. **Default:** `0`
+    """
+    z_int::Float64
+    """
+    Potential of the intermediate electrode, in V. Used only when `intermediate_electrode == true`. **Default:** `0`
+    """
+    V_int::Float64
+    """
     Can be either `:sheath` or `:dirichlet`. If `:sheath`, electron temperature has a Neumann boundary condition at the anode and a self-consistent anode sheath potential is computed. If `:dirichlet`, electron temperature at anode is set to `anode_Tev` and no sheath potential is modeled. **Default:** `:sheath`.
     """
     anode_boundary_condition::Symbol
@@ -161,6 +173,9 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
             propellants = nothing,
             # Optional arguments
             cathode_coupling_voltage = 0.0,
+            intermediate_electrode = false,
+            z_int = 0.0,
+            V_int = 0.0,
             anode_boundary_condition = :sheath,
             cathode_Tev = 2.0,
             anode_Tev = cathode_Tev,
@@ -225,6 +240,7 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
         # Convert to Float64 if using Unitful
         discharge_voltage = convert_to_float64(discharge_voltage, units(:V))
         cathode_coupling_voltage = convert_to_float64(cathode_coupling_voltage, units(:V))
+        V_int = convert_to_float64(V_int, units(:V))
 
         anode_Tev = convert_to_float64(anode_Tev, units(:eV))
 
@@ -232,6 +248,7 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
             convert_to_float64(domain[1], units(:m)),
             convert_to_float64(domain[2], units(:m)),
         )
+        z_int = convert_to_float64(z_int, units(:m))
 
         background_temperature_K = convert_to_float64(background_temperature_K, units(:K))
         background_pressure_Torr = convert_to_float64(background_pressure_Torr, units(:Pa))
@@ -242,6 +259,18 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
             throw(ArgumentError("Anode boundary condition must be one of [:sheath, :dirichlet]. Got: $(anode_boundary_condition)"))
         end
 
+        if intermediate_electrode
+            if !(domain[1] < z_int < domain[2])
+                throw(ArgumentError("Intermediate electrode position z_int must lie inside the domain $(domain). Got: $(z_int)"))
+            end
+
+            V_min = min(discharge_voltage, cathode_coupling_voltage)
+            V_max = max(discharge_voltage, cathode_coupling_voltage)
+            if !(V_min <= V_int <= V_max)
+                throw(ArgumentError("Intermediate electrode voltage V_int must lie between discharge_voltage ($(discharge_voltage)) and cathode_coupling_voltage ($(cathode_coupling_voltage)). Got: $(V_int)"))
+            end
+        end
+
         return new{A, TC, W, IC, typeof(source_heavy_species), typeof(source_energy)}(
             # Mandatory arguments
             thruster,
@@ -250,6 +279,9 @@ struct Config{A <: AnomalousTransportModel, TC <: ThermalConductivityModel, W <:
             propellants,
             # Optional arguments
             cathode_coupling_voltage,
+            intermediate_electrode,
+            z_int,
+            V_int,
             anode_boundary_condition,
             anode_Tev,
             cathode_Tev,
@@ -359,6 +391,9 @@ function params_from_config(config)
         anom_smoothing_iters = config.anom_smoothing_iters,
         discharge_voltage = config.discharge_voltage,
         cathode_coupling_voltage = config.cathode_coupling_voltage,
+        intermediate_electrode = config.intermediate_electrode,
+        z_int = config.z_int,
+        V_int = config.V_int,
         electron_ion_collisions = config.electron_ion_collisions,
         min_Te = config.min_Te,
         background_pressure_Torr = config.background_pressure_Torr,
