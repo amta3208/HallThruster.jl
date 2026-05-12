@@ -148,3 +148,48 @@ function test_boundaries()
 end
 
 test_boundaries()
+
+function test_intermediate_electrode_potential()
+    V_d = 300.0
+    V_cc = 20.0
+    V_int = 150.0
+    z_int = 0.04
+
+    config = het.Config(
+        domain = (0, 0.08),
+        discharge_voltage = V_d,
+        propellant = het.Xenon,
+        anode_mass_flow_rate = 5.0e-6,
+        thruster = het.SPT_100,
+        anode_boundary_condition = :dirichlet,
+        cathode_coupling_voltage = V_cc,
+        intermediate_electrode = true,
+        z_int = z_int,
+        V_int = V_int,
+    )
+
+    sim = het.SimParams(
+        duration = 1.0e-8,
+        dt = 1.0e-8,
+        grid = het.EvenGrid(30),
+        num_save = 2,
+        verbose = false,
+        adaptive = false,
+    )
+    params = het.setup_simulation(config, sim)
+    interface_edge = het.nearest_interior_edge(params.grid, z_int)
+
+    (; ϕ, ∇ϕ, Id, Id_stage) = params.cache
+    ϕ_int_left = ϕ[interface_edge] + 0.5 * params.grid.dz_cell[interface_edge] * ∇ϕ[interface_edge]
+    ϕ_int_right = ϕ[interface_edge + 1] - 0.5 * params.grid.dz_cell[interface_edge + 1] * ∇ϕ[interface_edge + 1]
+    @test Id[] == Id_stage[1]
+    @test Id_stage[1] != Id_stage[2]
+    @test 0.5 * (ϕ[1] + ϕ[2]) ≈ V_d
+    @test ϕ_int_left ≈ V_int
+    @test ϕ_int_right ≈ V_int
+    @test 0.5 * (ϕ[end - 1] + ϕ[end]) ≈ V_cc
+
+    return
+end
+
+test_intermediate_electrode_potential()

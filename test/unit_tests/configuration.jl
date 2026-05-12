@@ -106,6 +106,49 @@ function test_configuration()
     return
 end
 
+function test_intermediate_electrode_config()
+    @testset "Intermediate electrode configuration" begin
+        common = (;
+            thruster = het.SPT_100,
+            discharge_voltage = 300.0,
+            cathode_coupling_voltage = 0.0,
+            domain = (0.0, 0.08),
+            anode_mass_flow_rate = 5.0e-6,
+        )
+
+        cfg = het.Config(; common...)
+        @test cfg.intermediate_electrode == false
+        @test cfg.z_int == 0.0
+        @test cfg.V_int == 0.0
+
+        cfg = het.Config(;
+            common...,
+            intermediate_electrode = true,
+            z_int = 0.04,
+            V_int = 150.0,
+        )
+        @test cfg.intermediate_electrode == true
+        @test cfg.z_int == 0.04
+        @test cfg.V_int == 150.0
+
+        @test_throws ArgumentError het.Config(;
+            common...,
+            intermediate_electrode = true,
+            z_int = 0.08,
+            V_int = 150.0,
+        )
+
+        @test_throws ArgumentError het.Config(;
+            common...,
+            intermediate_electrode = true,
+            z_int = 0.04,
+            V_int = 350.0,
+        )
+    end
+
+    return
+end
+
 function test_multiple_propellants()
 
     Xe = het.Propellant(het.Xenon, flow_rate_kg_s = 4.0e-6, max_charge = 3)
@@ -316,6 +359,7 @@ end
 
 test_allowed_charges_initialization()
 test_config_serialization()
+test_intermediate_electrode_config()
 test_configuration()
 @testset "Multiple propellants" begin
     test_multiple_propellants()
