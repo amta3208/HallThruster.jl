@@ -53,10 +53,10 @@ function update_walls!(radial_loss_frequency, νew_momentum, wall_loss_model, pa
 end
 
 function update_electrical_vars!(params)
-    (; cache, anom_smoothing_iters, landmark, grid) = params
+    (; cache, anom_smoothing_iters, landmark, grid, intermediate_electrode, z_int, V_int) = params
     (;
         cell_cache_1, νan, νe, νc, μ, B, νew_momentum, anom_multiplier,
-        Vs, ue, ji, channel_area, ne, Id, K, pe, ∇pe, ϕ, ∇ϕ,
+        Vs, ue, ji, channel_area, ne, Id, Id_stage, K, pe, ∇pe, ϕ, ∇ϕ,
     ) = cache
 
     # Smooth anomalous transport model
@@ -90,16 +90,33 @@ function update_electrical_vars!(params)
 
     apply_drag = !landmark && params.iteration[] > 5
 
-    Id[] = integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
+    interface_edge = 0
+    if intermediate_electrode
+        I1, I2, interface_edge = integrate_staged_discharge_currents(
+            grid, cache, V_L, V_int, V_R, z_int, apply_drag
+        )
+        Id_stage[1] = I1
+        Id_stage[2] = I2
+        Id[] = I1
+    else
+        Id[] = integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
+        Id_stage[1] = Id[]
+        Id_stage[2] = Id[]
+    end
 
     # Compute electric field and potential
-    update_electric_field!(∇ϕ, cache, apply_drag)
-    integrate_potential!(ϕ, ∇ϕ, grid, V_L)
+    update_electric_field!(∇ϕ, cache, apply_drag, intermediate_electrode, interface_edge)
+    if intermediate_electrode
+        integrate_potential!(ϕ, ∇ϕ, grid, V_L, V_int, V_R, interface_edge)
+    else
+        integrate_potential!(ϕ, ∇ϕ, grid, V_L)
+    end
 
     # Compute the electron velocity and electron kinetic energy
     @inbounds for i in eachindex(ue)
         # je + ji = Id / A
-        ue[i] = (ji[i] - Id[] / channel_area[i]) / e / ne[i]
+        I = staged_discharge_current(Id, Id_stage, intermediate_electrode, interface_edge, i)
+        ue[i] = (ji[i] - I / channel_area[i]) / e / ne[i]
     end
 
     # Kinetic energy in both axial and azimuthal directions is accounted for
@@ -107,13 +124,8 @@ function update_electrical_vars!(params)
     return
 end
 
-# Compute the axially-constant discharge current using Ohm's law
-function integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
+function fill_discharge_current_integrands!(integrand_1, integrand_2, grid, cache, apply_drag)
     (; ∇pe, μ, ne, ji, channel_area, avg_neutral_vel, avg_ion_vel, νei, νen, νan) = cache
-
-    # Compute integrands at all cell centers
-    integrand_1 = cache.cell_cache_1
-    integrand_2 = cache.cell_cache_2
 
     @inbounds for i in eachindex(grid.cell_centers)
         integrand_1[i] = (ji[i] / e / μ[i] + ∇pe[i]) / ne[i]
@@ -131,6 +143,16 @@ function integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
     integrand_1[end] = 0.5 * (integrand_1[end - 1] + integrand_1[end])
     integrand_2[1] = 0.5 * (integrand_2[1] + integrand_2[2])
     integrand_2[end] = 0.5 * (integrand_2[end - 1] + integrand_2[end])
+
+    return integrand_1, integrand_2
+end
+
+# Compute the axially-constant discharge current using Ohm's law
+function integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
+    # Compute integrands at all cell centers
+    integrand_1 = cache.cell_cache_1
+    integrand_2 = cache.cell_cache_2
+    fill_discharge_current_integrands!(integrand_1, integrand_2, grid, cache, apply_drag)
 
     # Compute integrals using trapezoidal rule around edges
     int1 = 0.0
@@ -161,6 +183,61 @@ function integrate_discharge_current(grid, cache, V_L, V_R, apply_drag)
     I = (ΔV + int1) / int2
 
     return I
+end
+
+function nearest_interior_edge(grid, z)
+    first_edge = firstindex(grid.edges) + 1
+    last_edge = lastindex(grid.edges) - 1
+
+    if first_edge > last_edge
+        throw(ArgumentError("Intermediate electrode requires at least two physical grid cells."))
+    end
+
+    best_edge = first_edge
+    best_distance = abs(grid.edges[best_edge] - z)
+
+    @inbounds for i in (first_edge + 1):last_edge
+        distance = abs(grid.edges[i] - z)
+        if distance < best_distance
+            best_edge = i
+            best_distance = distance
+        end
+    end
+
+    return best_edge
+end
+
+function integrate_discharge_current_cells(grid, integrand_1, integrand_2, first_cell, last_cell, V_L, V_R)
+    int1 = 0.0
+    int2 = 0.0
+
+    @inbounds for i in first_cell:last_cell
+        Δz = grid.dz_cell[i]
+        int1 += Δz * integrand_1[i]
+        int2 += Δz * integrand_2[i]
+    end
+
+    ΔV = V_L - V_R
+    return (ΔV + int1) / int2
+end
+
+function integrate_staged_discharge_currents(grid, cache, V_L, V_int, V_R, z_int, apply_drag)
+    integrand_1 = cache.cell_cache_1
+    integrand_2 = cache.cell_cache_2
+    fill_discharge_current_integrands!(integrand_1, integrand_2, grid, cache, apply_drag)
+
+    first_cell = firstindex(grid.cell_centers) + 1
+    last_cell = lastindex(grid.cell_centers) - 1
+
+    interface_edge = nearest_interior_edge(grid, z_int)
+    I1 = integrate_discharge_current_cells(
+        grid, integrand_1, integrand_2, first_cell, interface_edge, V_L, V_int
+    )
+    I2 = integrate_discharge_current_cells(
+        grid, integrand_1, integrand_2, interface_edge + 1, last_cell, V_int, V_R
+    )
+
+    return I1, I2, interface_edge
 end
 
 function electron_kinetic_energy!(K, νe, B, ue)

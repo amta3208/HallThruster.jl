@@ -1,8 +1,13 @@
-function update_electric_field!(∇ϕ, cache, apply_drag)
-    (; ji, Id, ne, μ, ∇pe, channel_area, νei, νen, νan, avg_ion_vel, avg_neutral_vel) = cache
+@inline function staged_discharge_current(Id, Id_stage, use_stages, interface_edge, i)
+    return use_stages ? Id_stage[ifelse(i <= interface_edge, 1, 2)] : Id[]
+end
+
+function update_electric_field!(∇ϕ, cache, apply_drag, use_stages = false, interface_edge = 0)
+    (; ji, Id, Id_stage, ne, μ, ∇pe, channel_area, νei, νen, νan, avg_ion_vel, avg_neutral_vel) = cache
 
     @inbounds for i in eachindex(∇ϕ)
-        E = ((Id[] / channel_area[i] - ji[i]) / e / μ[i] - ∇pe[i]) / ne[i]
+        I = staged_discharge_current(Id, Id_stage, use_stages, interface_edge, i)
+        E = ((I / channel_area[i] - ji[i]) / e / μ[i] - ∇pe[i]) / ne[i]
 
         if (apply_drag)
             ion_drag = avg_ion_vel[i] * (νei[i] + νan[i]) * me / e
@@ -40,6 +45,29 @@ function integrate_potential!(ϕ, ∇ϕ, grid, V_L)
     # Replace electric field and cell center values
     grid.cell_centers[1], grid.cell_centers[end] = zL, zR
     ∇ϕ[1], ∇ϕ[end] = EL, ER
+    return
+end
+
+function integrate_potential!(ϕ, ∇ϕ, grid, V_L, V_int, V_R, interface_edge)
+    first_cell = firstindex(grid.cell_centers) + 1
+    last_cell = lastindex(grid.cell_centers) - 1
+
+    ϕ_edge = V_L
+    @inbounds for i in first_cell:interface_edge
+        Δz = grid.dz_cell[i]
+        ϕ[i] = ϕ_edge + 0.5 * Δz * ∇ϕ[i]
+        ϕ_edge += Δz * ∇ϕ[i]
+    end
+
+    ϕ_edge = V_int
+    @inbounds for i in (interface_edge + 1):last_cell
+        Δz = grid.dz_cell[i]
+        ϕ[i] = ϕ_edge + 0.5 * Δz * ∇ϕ[i]
+        ϕ_edge += Δz * ∇ϕ[i]
+    end
+
+    ϕ[1] = 2 * V_L - ϕ[2]
+    ϕ[end] = 2 * V_R - ϕ[end - 1]
     return
 end
 
